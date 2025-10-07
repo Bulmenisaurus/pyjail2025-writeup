@@ -102,13 +102,16 @@ TypeError: 'typing.TypeVar' object is not callable
         what now? A common formula used when we don't have access to any
         builtins is
         <code
-          >().__class__.__mro__[1].__subclasses__()[104].load_module("os").system("sh")</code
+          >().__class__.__mro__[1].__subclasses__()[122].load_module("os").system("sh")</code
         >, which you can find in places like the
         <a href="https://shirajuki.js.org/blog/pyjail-cheatsheet/"
           >pyjail cheatsheet</a
-        >. Right now, this doesn't work because of our banned characters,
-        <code>()[]""</code>.
-        <!-- TODO: explain what this formula actually does -->
+        >. It works by first accessing all of the subclasses of object, of which
+        there are a lot! The 122nd one happens to be
+        <code>_frozen_importlib.BuiltinImporter</code>, which we can then use to
+        import the os class and call <code>system</code>. Right now, this
+        doesn't work because of our banned characters, <code>()[]""</code> so we
+        have to find a way to circumvent these restrictions.
       </p>
       <h2>Simplifying the problem</h2>
       <p>
@@ -196,8 +199,9 @@ a.b = c
       <p>
         We're making progress! Of the banned characters, we're using only
         <code>[]"</code>. Getting rid of brackets should be easy, we can change
-        the list comprehensions should be easy, we can just change the brackets
-        for braces, turning the list comprehensions into set comprehension.
+        them into braces, turning the list comprehensions into set
+        comprehensions. The singletons also just turn into sets with one
+        element.
       </p>
       <p>
         Not so fast: it's <em>so close</em> to working. But we run into a single
