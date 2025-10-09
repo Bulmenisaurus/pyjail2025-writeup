@@ -16,7 +16,7 @@
     <style>
       article {
         margin: 0 auto;
-        width: 80ch;
+        max-width: 80ch;
       }
     </style>
   </head>
@@ -182,7 +182,7 @@ a.b = c
         <code>eval</code>, since a list comprehension can be executed in an eval
         context.
       </p>
-      <pre><code class="language-python"># a line-by-line rewriting of the above code, using listcomps instead of variable assignment
+      <pre><code class="language-python">
 [
     B + "sh"
     for B in [__builtins__]
@@ -213,7 +213,7 @@ a.b = c
         realized that we could simply use the operator trick to call
         <code>tuple</code> on the subclasses, making it a hashable type.
       </p>
-      <pre><code>
+      <pre><code class="language-python">
 {
     B + "sh"
     for B in {__builtins__}
@@ -237,7 +237,7 @@ a.b = c
       <pre><code class="language-python">{
     ...
     
-    for SafeBuiltins.__mul__ in {doc.__getitem__}
+    for SafeBuiltins.__mul__ in {{}.__doc__.__getitem__}
     for s in {B*97}
     for h in {B*280}
     for o in {B*25}
