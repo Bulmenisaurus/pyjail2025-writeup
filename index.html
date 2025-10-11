@@ -107,11 +107,13 @@ TypeError: 'typing.TypeVar' object is not callable
         <a href="https://shirajuki.js.org/blog/pyjail-cheatsheet/"
           >pyjail cheatsheet</a
         >. It works by first accessing all of the subclasses of object, of which
-        there are a lot! The 122nd one happens to be
-        <code>_frozen_importlib.BuiltinImporter</code>, which we can then use to
-        import the os class and call <code>system</code>. Right now, this
-        doesn't work because of our banned characters, <code>()[]""</code> so we
-        have to find a way to circumvent these restrictions.
+        there are a lot! This is because every single class in python implictly
+        subclasses <code>object</code>. The 122nd one happens to be
+        <code>_frozen_importlib.BuiltinImporter</code> (as of the version used
+        in the jail, 3.13.5), which we can then use to import the os class and
+        call <code>system</code>. Right now, this doesn't work because of our
+        banned characters, <code>()[]""</code> so we have to find a way to
+        circumvent these restrictions.
       </p>
       <h2>Simplifying the problem</h2>
       <p>
